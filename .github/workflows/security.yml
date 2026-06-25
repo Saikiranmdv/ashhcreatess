@@ -53,26 +53,48 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const audit = JSON.parse(fs.readFileSync('audit-output.json', 'utf8'));
-            const prNumber = context.payload.pull_request.number;
-            const metadata = audit.metadata || {};
-            const vulnerabilities = metadata.vulnerabilities || {};
-            const summary = Object.entries(vulnerabilities)
-              .map(([severity, count]) => `${severity}: ${count}`)
-              .join(' | ') || 'No vulnerabilities found';
-            const totalVulns = Object.values(vulnerabilities).reduce((sum, count) => sum + count, 0);
-            const title = totalVulns > 0 ? '**Vulnerabilities found**' : '**No vulnerabilities found**';
-            let body = `### npm audit results\n\n${title}\n\n**Summary:** ${summary}\n\n`;
-            if (totalVulns > 0) {
-              body += `> This workflow will fail when vulnerabilities are detected.\n\n`;
+            console.log('Starting audit comment...');
+            
+            try {
+              const auditData = fs.readFileSync('audit-output.json', 'utf8');
+              console.log('Audit file read, size:', auditData.length);
+              
+              const audit = JSON.parse(auditData);
+              console.log('JSON parsed successfully');
+              
+              const prNumber = context.payload.pull_request.number;
+              console.log('PR number:', prNumber);
+              
+              const metadata = audit.metadata || {};
+              const vulnerabilities = metadata.vulnerabilities || {};
+              console.log('Vulnerabilities object:', vulnerabilities);
+              
+              const summary = Object.entries(vulnerabilities)
+                .map(([severity, count]) => `${severity}: ${count}`)
+                .join(' | ') || 'No vulnerabilities found';
+              const totalVulns = Object.values(vulnerabilities).reduce((sum, count) => sum + count, 0);
+              const title = totalVulns > 0 ? '**Vulnerabilities found**' : '**No vulnerabilities found**';
+              let body = `### npm audit results\n\n${title}\n\n**Summary:** ${summary}\n\n`;
+              if (totalVulns > 0) {
+                body += `> This workflow will fail when vulnerabilities are detected.\n\n`;
+              }
+              body += `<details>\n<summary>Raw audit output</summary>\n\n\`\`\`json\n${JSON.stringify(audit, null, 2)}\n\`\`\`\n</details>`;
+              
+              console.log('Comment body prepared, length:', body.length);
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+              
+              console.log('Comment posted successfully!');
+            } catch (error) {
+              console.error('Error:', error.message);
+              console.error('Stack:', error.stack);
+              throw error;
             }
-            body += `<details>\n<summary>Raw audit output</summary>\n\n\`\`\`json\n${JSON.stringify(audit, null, 2)}\n\`\`\`\n</details>`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body,
-            });
 
       - name: Fail on vulnerabilities
         if: steps.audit.outputs.exit_code != '0'
