@@ -23,4 +23,47 @@ jobs:
         run: npm install
 
       - name: Run npm audit
-        run: npm audit --audit-level=low
+        id: audit
+        continue-on-error: true
+        run: |
+          npm audit --audit-level=low --json > audit-output.json 2>/dev/null || true
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          if [ -s audit-output.json ]; then
+            echo "has_output=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_output=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment npm audit findings on PR
+        if: steps.audit.outputs.has_output == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const audit = JSON.parse(fs.readFileSync('audit-output.json', 'utf8'));
+            const prNumber = context.payload.pull_request.number;
+            const metadata = audit.metadata || {};
+            const vulnerabilities = metadata.vulnerabilities || {};
+            const summary = Object.entries(vulnerabilities)
+              .map(([severity, count]) => `${severity}: ${count}`)
+              .join(' | ') || 'No vulnerabilities found';
+            const totalVulns = Object.values(vulnerabilities).reduce((sum, count) => sum + count, 0);
+            const title = totalVulns > 0 ? '**Vulnerabilities found**' : '**No vulnerabilities found**';
+            let body = `### npm audit results\n\n${title}\n\n**Summary:** ${summary}\n\n`;
+            if (totalVulns > 0) {
+              body += `> This workflow will fail when vulnerabilities are detected.\n\n`;
+            }
+            body += `<details>\n<summary>Raw audit output</summary>\n\n\`\`\`json\n${JSON.stringify(audit, null, 2)}\n\`\`\`\n</details>`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });
+
+      - name: Fail on vulnerabilities
+        if: steps.audit.outputs.exit_code != '0'
+        run: |
+          echo "npm audit detected vulnerabilities."
+          exit 1
