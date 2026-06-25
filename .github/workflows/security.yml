@@ -1,7 +1,7 @@
 name: Security Audit
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -35,14 +35,16 @@ jobs:
         id: audit
         continue-on-error: true
         run: |
-          npm audit --audit-level=low --json > audit-output.json 2>/dev/null
+          npm audit --audit-level=low --json > audit-output.json
           audit_code=$?
           echo "exit_code=$audit_code" >> $GITHUB_OUTPUT
-          if [ -s audit-output.json ]; then
-            echo "has_output=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_output=false" >> $GITHUB_OUTPUT
-          fi
+          echo "has_output=true" >> $GITHUB_OUTPUT
+          
+      - name: Debug audit output
+        run: |
+          echo "Audit exit code: $(cat "$GITHUB_OUTPUT" | grep exit_code)"
+          echo "File size: $(wc -c < audit-output.json)"
+          head -20 audit-output.json
 
       - name: Comment npm audit findings on PR
         if: steps.audit.outputs.has_output == 'true'
